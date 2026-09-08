@@ -4,12 +4,12 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class AiOcrService {
-  final String _apiKey = dotenv.get('GEMINI_API_KEY', fallback: '');
-
   /// Scans an image and returns extracted JSON data.
   /// [isOdometer] defines if we are looking for odometer reading or receipt data.
   Future<Map<String, dynamic>?> scanImage(File imageFile, bool isOdometer) async {
-    if (_apiKey.isEmpty || _apiKey == 'YOUR_API_KEY_HERE') {
+    final String apiKey = dotenv.maybeGet('GEMINI_API_KEY') ?? '';
+    
+    if (apiKey.isEmpty || apiKey == 'YOUR_API_KEY_HERE') {
       throw Exception('API Key not configured in .env file');
     }
 
