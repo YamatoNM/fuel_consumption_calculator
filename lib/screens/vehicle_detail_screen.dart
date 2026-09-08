@@ -1,8 +1,12 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:image_picker/image_picker.dart';
 import '../models/vehicle.dart';
 import '../models/consumption_entry.dart';
 import '../services/storage_service.dart';
+import '../services/price_service.dart';
+import '../services/ai_ocr_service.dart';
 
 class VehicleDetailScreen extends StatefulWidget {
   final Vehicle vehicle;
@@ -14,113 +18,151 @@ class VehicleDetailScreen extends StatefulWidget {
 
 class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
   final StorageService _storageService = StorageService();
+  final PriceService _priceService = PriceService();
+  final AiOcrService _aiService = AiOcrService();
+  final ImagePicker _picker = ImagePicker();
+
   final _formKey = GlobalKey<FormState>();
-  final _distanceController = TextEditingController();
+  final _odoController = TextEditingController();
   final _fuelController = TextEditingController();
+  final _priceController = TextEditingController();
 
   List<ConsumptionEntry> _entries = [];
   bool _isLoading = true;
+  bool _isProcessingAi = false;
+  bool _isManualMode = true;
   String _currentResult = '';
+  double? _livePrice;
 
   @override
   void initState() {
     super.initState();
-    _loadEntries();
+    _loadData();
   }
 
   @override
   void dispose() {
-    _distanceController.dispose();
+    _odoController.dispose();
     _fuelController.dispose();
+    _priceController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadEntries() async {
+  Future<void> _loadData() async {
     setState(() => _isLoading = true);
+    
+    // Fetch entries
     final entries = await _storageService.getEntriesForVehicle(widget.vehicle.id);
-    // Sort most recent first
     entries.sort((a, b) => b.date.compareTo(a.date));
+
+    // Fetch live price
+    final price = await _priceService.getLivePrice(widget.vehicle.fuelType);
+    
     setState(() {
       _entries = entries;
+      _livePrice = price;
+      if (price != null) {
+        _priceController.text = price.toStringAsFixed(2);
+      }
       _isLoading = false;
     });
   }
 
+  Future<void> _captureAndScan(bool isOdometer) async {
+    final XFile? photo = await showModalBottomSheet<XFile?>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt),
+              title: const Text('Cameră'),
+              onTap: () async => Navigator.pop(context, await _picker.pickImage(source: ImageSource.camera)),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library),
+              title: const Text('Galerie'),
+              onTap: () async => Navigator.pop(context, await _picker.pickImage(source: ImageSource.gallery)),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (photo == null) return;
+
+    setState(() => _isProcessingAi = true);
+
+    try {
+      final data = await _aiService.scanImage(File(photo.path), isOdometer);
+      if (data != null) {
+        if (isOdometer && data['odometer_km'] != null) {
+          _odoController.text = data['odometer_km'].toString();
+        } else if (!isOdometer) {
+          if (data['fuel_liters'] != null) _fuelController.text = data['fuel_liters'].toString();
+          if (data['price_per_liter'] != null) _priceController.text = data['price_per_liter'].toString();
+        }
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Date extrase cu încredere: ${data['confidence']}')),
+          );
+        }
+      } else {
+        throw Exception('Nu s-au putut extrage datele.');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Eroare AI: ${e.toString()}'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      setState(() => _isProcessingAi = false);
+    }
+  }
+
   void _calculateAndSave() async {
     if (_formKey.currentState!.validate()) {
-      final double distance = double.parse(_distanceController.text);
+      final double currentOdo = double.parse(_odoController.text);
       final double fuel = double.parse(_fuelController.text);
+      final double pricePerLiter = double.tryParse(_priceController.text) ?? _livePrice ?? 0.0;
+
+      // Get last odometer
+      double lastOdo = _entries.isNotEmpty ? _entries.first.odometerKm : widget.vehicle.initialOdometer;
+
+      if (currentOdo <= lastOdo) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Kilometrajul introdus e mai mic decât ultima înregistrare'), backgroundColor: Colors.red),
+        );
+        return;
+      }
+
+      final double distance = currentOdo - lastOdo;
       final double result = (fuel / distance) * 100;
+      final double totalCost = fuel * pricePerLiter;
 
       final newEntry = ConsumptionEntry(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
         vehicleId: widget.vehicle.id,
         date: DateTime.now(),
-        distanceKm: distance,
+        odometerKm: currentOdo,
         fuelLiters: fuel,
         result: result,
+        fuelPricePerLiter: pricePerLiter,
+        totalCost: totalCost,
       );
 
       await _storageService.addEntry(newEntry);
       
       setState(() {
-        _currentResult = 'Consum mediu: ${result.toStringAsFixed(2)} L/100km';
-        _distanceController.clear();
+        _currentResult = 'Consum: ${result.toStringAsFixed(2)} L/100km | Cost: ${totalCost.toStringAsFixed(2)} MDL';
+        _odoController.clear();
         _fuelController.clear();
+        // Keep price as it might be live/cached
       });
       
-      _loadEntries();
-    }
-  }
-
-  void _resetFields() {
-    setState(() {
-      _distanceController.clear();
-      _fuelController.clear();
-      _currentResult = '';
-    });
-  }
-
-  void _deleteEntry(ConsumptionEntry entry) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Șterge înregistrarea'),
-        content: const Text('Sigur dorești să ștergi această înregistrare?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Nu')),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Da')),
-        ],
-      ),
-    );
-
-    if (confirmed == true) {
-      await _storageService.deleteEntry(entry.id);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Înregistrare ștearsă')),
-        );
-      }
-      _loadEntries();
-    }
-  }
-
-  void _clearHistory() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Șterge tot istoricul'),
-        content: const Text('Sigur dorești să ștergi TOATE înregistrările pentru acest automobil?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Anulează')),
-          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Șterge tot', style: TextStyle(color: Colors.red))),
-        ],
-      ),
-    );
-
-    if (confirmed == true) {
-      await _storageService.deleteAllEntriesForVehicle(widget.vehicle.id);
-      _loadEntries();
+      _loadData();
     }
   }
 
@@ -130,18 +172,31 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
       appBar: AppBar(
         title: Text(widget.vehicle.name),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _resetFields,
-            tooltip: 'Resetează câmpurile',
-          ),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: () => setState(() {
+            _odoController.clear();
+            _fuelController.clear();
+            _currentResult = '';
+          })),
         ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                // Calculator Section
+                // Input Mode Toggle
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                  child: SegmentedButton<bool>(
+                    segments: const [
+                      ButtonSegment(value: true, label: Text('Manual'), icon: Icon(Icons.edit)),
+                      ButtonSegment(value: false, label: Text('Scanare AI'), icon: Icon(Icons.auto_awesome)),
+                    ],
+                    selected: {_isManualMode},
+                    onSelectionChanged: (val) => setState(() => _isManualMode = val.first),
+                  ),
+                ),
+
+                // Form Section
                 Padding(
                   padding: const EdgeInsets.all(16.0),
                   child: Card(
@@ -152,53 +207,66 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
                         key: _formKey,
                         child: Column(
                           children: [
-                            TextFormField(
-                              controller: _distanceController,
-                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                              decoration: const InputDecoration(
-                                labelText: 'Distanța parcursă (km)',
-                                border: OutlineInputBorder(),
-                                prefixIcon: Icon(Icons.route),
-                              ),
-                              validator: (value) {
-                                if (value == null || value.isEmpty) return 'Completează câmpul.';
-                                final n = double.tryParse(value);
-                                if (n == null) return 'Introdu un număr.';
-                                if (n <= 0) return 'Trebuie să fie > 0.';
-                                return null;
-                              },
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextFormField(
+                                    controller: _odoController,
+                                    keyboardType: TextInputType.number,
+                                    decoration: const InputDecoration(labelText: 'Odometer (km)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.speed)),
+                                    validator: (v) => (v == null || v.isEmpty) ? 'Necesar' : null,
+                                  ),
+                                ),
+                                if (!_isManualMode)
+                                  IconButton(
+                                    icon: const Icon(Icons.camera_alt, color: Colors.blue),
+                                    onPressed: _isProcessingAi ? null : () => _captureAndScan(true),
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextFormField(
+                                    controller: _fuelController,
+                                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                    decoration: const InputDecoration(labelText: 'Combustibil (litri)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.local_gas_station)),
+                                    validator: (v) => (v == null || v.isEmpty) ? 'Necesar' : null,
+                                  ),
+                                ),
+                                if (!_isManualMode)
+                                  IconButton(
+                                    icon: const Icon(Icons.receipt_long, color: Colors.green),
+                                    onPressed: _isProcessingAi ? null : () => _captureAndScan(false),
+                                  ),
+                              ],
                             ),
                             const SizedBox(height: 12),
                             TextFormField(
-                              controller: _fuelController,
+                              controller: _priceController,
                               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                              decoration: const InputDecoration(
-                                labelText: 'Combustibil consumat (litri)',
-                                border: OutlineInputBorder(),
-                                prefixIcon: Icon(Icons.local_gas_station),
+                              decoration: InputDecoration(
+                                labelText: 'Preț per litru (MDL)',
+                                border: const OutlineInputBorder(),
+                                prefixIcon: const Icon(Icons.payments),
+                                suffixText: _livePrice != null ? '(Live ANRE)' : '',
                               ),
-                              validator: (value) {
-                                if (value == null || value.isEmpty) return 'Completează câmpul.';
-                                final n = double.tryParse(value);
-                                if (n == null) return 'Introdu un număr.';
-                                if (n < 0) return 'Nu poate fi negativ.';
-                                return null;
-                              },
                             ),
                             const SizedBox(height: 16),
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton(
-                                onPressed: _calculateAndSave,
-                                child: const Text('Calculează și salvează'),
+                            if (_isProcessingAi)
+                              const LinearProgressIndicator()
+                            else
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton(
+                                  onPressed: _calculateAndSave,
+                                  child: const Text('Calculează și salvează'),
+                                ),
                               ),
-                            ),
                             if (_currentResult.isNotEmpty) ...[
                               const SizedBox(height: 12),
-                              Text(
-                                _currentResult,
-                                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blue),
-                              ),
+                              Text(_currentResult, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.blue)),
                             ]
                           ],
                         ),
@@ -206,61 +274,38 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
                     ),
                   ),
                 ),
-                
+
                 // History Header
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Istoric consum', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                      if (_entries.isNotEmpty)
-                        TextButton.icon(
-                          onPressed: _clearHistory,
-                          icon: const Icon(Icons.delete_sweep, size: 20),
-                          label: const Text('Șterge tot'),
-                          style: TextButton.styleFrom(foregroundColor: Colors.red),
-                        ),
-                    ],
-                  ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16.0),
+                  child: Align(alignment: Alignment.centerLeft, child: Text('Istoric înregistrări', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
                 ),
 
                 // History List
                 Expanded(
                   child: _entries.isEmpty
-                      ? const Center(child: Text('Nicio înregistrare încă', style: TextStyle(color: Colors.grey)))
+                      ? const Center(child: Text('Nicio înregistrare încă'))
                       : ListView.builder(
                           itemCount: _entries.length,
                           itemBuilder: (context, index) {
                             final entry = _entries[index];
-                            final dateStr = DateFormat('dd.MM.yyyy HH:mm').format(entry.date);
-                            return Dismissible(
-                              key: Key(entry.id),
-                              background: Container(color: Colors.red, alignment: Alignment.centerRight, padding: const EdgeInsets.only(right: 20), child: const Icon(Icons.delete, color: Colors.white)),
-                              direction: DismissDirection.endToStart,
-                              confirmDismiss: (dir) async {
-                                final bool? res = await showDialog<bool>(
-                                  context: context,
-                                  builder: (context) => AlertDialog(
-                                    title: const Text('Șterge înregistrarea'),
-                                    content: const Text('Sigur dorești să ștergi această înregistrare?'),
-                                    actions: [
-                                      TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Nu')),
-                                      TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Da')),
-                                    ],
-                                  ),
-                                );
-                                return res;
-                              },
-                              onDismissed: (dir) async {
-                                await _storageService.deleteEntry(entry.id);
-                                _loadEntries();
-                              },
-                              child: ListTile(
-                                leading: const Icon(Icons.history),
-                                title: Text('$dateStr'),
-                                subtitle: Text('${entry.distanceKm} km, ${entry.fuelLiters}L → ${entry.result.toStringAsFixed(2)} L/100km'),
-                                trailing: const Icon(Icons.chevron_left, color: Colors.grey, size: 16),
+                            final dateStr = DateFormat('dd.MM.yyyy').format(entry.date);
+                            // Calc distance for display
+                            double prevOdo = (index + 1 < _entries.length) 
+                                ? _entries[index + 1].odometerKm 
+                                : widget.vehicle.initialOdometer;
+                            double dist = entry.odometerKm - prevOdo;
+
+                            return ListTile(
+                              leading: const Icon(Icons.history),
+                              title: Text('$dateStr — Odo: ${entry.odometerKm} km'),
+                              subtitle: Text('${dist.toStringAsFixed(1)} km, ${entry.fuelLiters}L → ${entry.result.toStringAsFixed(2)} L/100km\nCost: ${entry.totalCost.toStringAsFixed(2)} MDL'),
+                              trailing: IconButton(
+                                icon: const Icon(Icons.delete, size: 20),
+                                onPressed: () async {
+                                  await _storageService.deleteEntry(entry.id);
+                                  _loadData();
+                                },
                               ),
                             );
                           },
