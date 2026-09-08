@@ -4,9 +4,11 @@ import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models/vehicle.dart';
 import '../models/consumption_entry.dart';
+import '../models/service_record.dart';
 import '../services/storage_service.dart';
 import '../services/price_service.dart';
 import '../services/ai_ocr_service.dart';
+import 'add_service_record_screen.dart';
 
 class VehicleDetailScreen extends StatefulWidget {
   final Vehicle vehicle;
@@ -28,6 +30,7 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
   final _priceController = TextEditingController();
 
   List<ConsumptionEntry> _entries = [];
+  List<ServiceRecord> _serviceRecords = [];
   bool _isLoading = true;
   bool _isProcessingAi = false;
   bool _isManualMode = true;
@@ -51,15 +54,20 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     
-    // Fetch entries
+    // Fetch fuel entries
     final entries = await _storageService.getEntriesForVehicle(widget.vehicle.id);
     entries.sort((a, b) => b.date.compareTo(a.date));
+
+    // Fetch service records
+    final services = await _storageService.getServiceRecords(widget.vehicle.id);
+    services.sort((a, b) => b.date.compareTo(a.date));
 
     // Fetch live price
     final price = await _priceService.getLivePrice(widget.vehicle.fuelType);
     
     setState(() {
       _entries = entries;
+      _serviceRecords = services;
       _livePrice = price;
       if (price != null) {
         _priceController.text = price.toStringAsFixed(2);
@@ -166,153 +174,310 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.vehicle.name),
+  void _deleteServiceRecord(ServiceRecord record) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Șterge intervenție'),
+        content: const Text('Sigur dorești să ștergi această înregistrare de service?'),
         actions: [
-          IconButton(icon: const Icon(Icons.refresh), onPressed: () => setState(() {
-            _odoController.clear();
-            _fuelController.clear();
-            _currentResult = '';
-          })),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Nu')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Șterge', style: TextStyle(color: Colors.red)),
+          ),
         ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                // Input Mode Toggle
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
-                  child: SegmentedButton<bool>(
-                    segments: const [
-                      ButtonSegment(value: true, label: Text('Manual'), icon: Icon(Icons.edit)),
-                      ButtonSegment(value: false, label: Text('Scanare AI'), icon: Icon(Icons.auto_awesome)),
-                    ],
-                    selected: {_isManualMode},
-                    onSelectionChanged: (val) => setState(() => _isManualMode = val.first),
-                  ),
-                ),
+    );
 
-                // Form Section
-                Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Card(
-                    elevation: 4,
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Form(
-                        key: _formKey,
-                        child: Column(
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: TextFormField(
-                                    controller: _odoController,
-                                    keyboardType: TextInputType.number,
-                                    decoration: const InputDecoration(labelText: 'Odometer (km)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.speed)),
-                                    validator: (v) => (v == null || v.isEmpty) ? 'Necesar' : null,
-                                  ),
-                                ),
-                                if (!_isManualMode)
-                                  IconButton(
-                                    icon: const Icon(Icons.camera_alt, color: Colors.blue),
-                                    onPressed: _isProcessingAi ? null : () => _captureAndScan(true),
-                                  ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: TextFormField(
-                                    controller: _fuelController,
-                                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                    decoration: const InputDecoration(labelText: 'Combustibil (litri)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.local_gas_station)),
-                                    validator: (v) => (v == null || v.isEmpty) ? 'Necesar' : null,
-                                  ),
-                                ),
-                                if (!_isManualMode)
-                                  IconButton(
-                                    icon: const Icon(Icons.receipt_long, color: Colors.green),
-                                    onPressed: _isProcessingAi ? null : () => _captureAndScan(false),
-                                  ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            TextFormField(
-                              controller: _priceController,
-                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                              decoration: InputDecoration(
-                                labelText: 'Preț per litru (MDL)',
-                                border: const OutlineInputBorder(),
-                                prefixIcon: const Icon(Icons.payments),
-                                suffixText: _livePrice != null ? '(Live ANRE)' : '',
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-                            if (_isProcessingAi)
-                              const LinearProgressIndicator()
-                            else
-                              SizedBox(
-                                width: double.infinity,
-                                child: ElevatedButton(
-                                  onPressed: _calculateAndSave,
-                                  child: const Text('Calculează și salvează'),
-                                ),
-                              ),
-                            if (_currentResult.isNotEmpty) ...[
-                              const SizedBox(height: 12),
-                              Text(_currentResult, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.blue)),
-                            ]
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+    if (confirmed == true) {
+      await _storageService.deleteServiceRecord(record.id);
+      _loadData();
+    }
+  }
 
-                // History Header
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16.0),
-                  child: Align(alignment: Alignment.centerLeft, child: Text('Istoric înregistrări', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
-                ),
+  void _editServiceRecord(ServiceRecord record) async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => AddServiceRecordScreen(
+          vehicle: widget.vehicle,
+          lastOdometer: _entries.isNotEmpty ? _entries.first.odometerKm : widget.vehicle.initialOdometer,
+          existingRecord: record,
+        ),
+      ),
+    );
+    if (result == true) {
+      _loadData();
+    }
+  }
 
-                // History List
-                Expanded(
-                  child: _entries.isEmpty
-                      ? const Center(child: Text('Nicio înregistrare încă'))
-                      : ListView.builder(
-                          itemCount: _entries.length,
-                          itemBuilder: (context, index) {
-                            final entry = _entries[index];
-                            final dateStr = DateFormat('dd.MM.yyyy').format(entry.date);
-                            // Calc distance for display
-                            double prevOdo = (index + 1 < _entries.length) 
-                                ? _entries[index + 1].odometerKm 
-                                : widget.vehicle.initialOdometer;
-                            double dist = entry.odometerKm - prevOdo;
+  final Map<ServiceType, IconData> _serviceIcons = {
+    ServiceType.uleiMotor: Icons.oil_barrel,
+    ServiceType.filtruUlei: Icons.filter_alt,
+    ServiceType.filtruAer: Icons.air,
+    ServiceType.filtruCombustibil: Icons.gas_meter,
+    ServiceType.anvelope: Icons.tire_repair,
+    ServiceType.frane: Icons.settings_backup_restore,
+    ServiceType.baterie: Icons.battery_charging_full,
+    ServiceType.revizieTehnica: Icons.assignment,
+    ServiceType.reparatie: Icons.build,
+    ServiceType.altul: Icons.more_horiz,
+  };
 
-                            return ListTile(
-                              leading: const Icon(Icons.history),
-                              title: Text('$dateStr — Odo: ${entry.odometerKm} km'),
-                              subtitle: Text('${dist.toStringAsFixed(1)} km, ${entry.fuelLiters}L → ${entry.result.toStringAsFixed(2)} L/100km\nCost: ${entry.totalCost.toStringAsFixed(2)} MDL'),
-                              trailing: IconButton(
-                                icon: const Icon(Icons.delete, size: 20),
-                                onPressed: () async {
-                                  await _storageService.deleteEntry(entry.id);
-                                  _loadData();
-                                },
-                              ),
-                            );
-                          },
-                        ),
-                ),
-              ],
+  final Map<ServiceType, String> _serviceLabels = {
+    ServiceType.uleiMotor: "Ulei motor",
+    ServiceType.filtruUlei: "Filtru ulei",
+    ServiceType.filtruAer: "Filtru aer",
+    ServiceType.filtruCombustibil: "Filtru combustibil",
+    ServiceType.anvelope: "Anvelope",
+    ServiceType.frane: "Frâne",
+    ServiceType.baterie: "Baterie",
+    ServiceType.revizieTehnica: "Revizie tehnică",
+    ServiceType.reparatie: "Reparație",
+    ServiceType.altul: "Altul",
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(widget.vehicle.name),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: () => setState(() {
+                _odoController.clear();
+                _fuelController.clear();
+                _currentResult = '';
+              }),
             ),
+          ],
+          bottom: const TabBar(
+            tabs: [
+              Tab(text: 'Consum', icon: Icon(Icons.local_gas_station)),
+              Tab(text: 'Service', icon: Icon(Icons.build)),
+            ],
+          ),
+        ),
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : TabBarView(
+                children: [
+                  _buildFuelTab(),
+                  _buildServiceTab(),
+                ],
+              ),
+      ),
     );
   }
+
+  Widget _buildFuelTab() {
+    return Column(
+      children: [
+        // Input Mode Toggle
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+          child: SegmentedButton<bool>(
+            segments: const [
+              ButtonSegment(value: true, label: Text('Manual'), icon: Icon(Icons.edit)),
+              ButtonSegment(value: false, label: Text('Scanare AI'), icon: Icon(Icons.auto_awesome)),
+            ],
+            selected: {_isManualMode},
+            onSelectionChanged: (val) => setState(() => _isManualMode = val.first),
+          ),
+        ),
+
+        // Form Section
+        Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Card(
+            elevation: 4,
+            child: Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _odoController,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(labelText: 'Odometer (km)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.speed)),
+                            validator: (v) => (v == null || v.isEmpty) ? 'Necesar' : null,
+                          ),
+                        ),
+                        if (!_isManualMode)
+                          IconButton(
+                            icon: const Icon(Icons.camera_alt, color: Colors.blue),
+                            onPressed: _isProcessingAi ? null : () => _captureAndScan(true),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _fuelController,
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            decoration: const InputDecoration(labelText: 'Combustibil (litri)', border: OutlineInputBorder(), prefixIcon: Icon(Icons.local_gas_station)),
+                            validator: (v) => (v == null || v.isEmpty) ? 'Necesar' : null,
+                          ),
+                        ),
+                        if (!_isManualMode)
+                          IconButton(
+                            icon: const Icon(Icons.receipt_long, color: Colors.green),
+                            onPressed: _isProcessingAi ? null : () => _captureAndScan(false),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _priceController,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: InputDecoration(
+                        labelText: 'Preț per litru (MDL)',
+                        border: const OutlineInputBorder(),
+                        prefixIcon: const Icon(Icons.payments),
+                        suffixText: _livePrice != null ? '(Live ANRE)' : '',
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    if (_isProcessingAi)
+                      const LinearProgressIndicator()
+                    else
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: _calculateAndSave,
+                          child: const Text('Calculează și salvează'),
+                        ),
+                      ),
+                    if (_currentResult.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Text(_currentResult, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.blue)),
+                    ]
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+
+        // History Header
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 16.0),
+          child: Align(alignment: Alignment.centerLeft, child: Text('Istoric înregistrări', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
+        ),
+
+        // History List
+        Expanded(
+          child: _entries.isEmpty
+              ? const Center(child: Text('Nicio înregistrare încă'))
+              : ListView.builder(
+                  itemCount: _entries.length,
+                  itemBuilder: (context, index) {
+                    final entry = _entries[index];
+                    final dateStr = DateFormat('dd.MM.yyyy').format(entry.date);
+                    // Calc distance for display
+                    double prevOdo = (index + 1 < _entries.length) 
+                        ? _entries[index + 1].odometerKm 
+                        : widget.vehicle.initialOdometer;
+                    double dist = entry.odometerKm - prevOdo;
+
+                    return ListTile(
+                      leading: const Icon(Icons.history),
+                      title: Text('$dateStr — Odo: ${entry.odometerKm} km'),
+                      subtitle: Text('${dist.toStringAsFixed(1)} km, ${entry.fuelLiters}L → ${entry.result.toStringAsFixed(2)} L/100km\nCost: ${entry.totalCost.toStringAsFixed(2)} MDL'),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete, size: 20),
+                        onPressed: () async {
+                          await _storageService.deleteEntry(entry.id);
+                          _loadData();
+                        },
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildServiceTab() {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () async {
+                final result = await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => AddServiceRecordScreen(
+                      vehicle: widget.vehicle,
+                      lastOdometer: _entries.isNotEmpty ? _entries.first.odometerKm : widget.vehicle.initialOdometer,
+                    ),
+                  ),
+                );
+                if (result == true) {
+                  _loadData();
+                }
+              },
+              icon: const Icon(Icons.add),
+              label: const Text('Adaugă intervenție'),
+            ),
+          ),
+        ),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 16.0),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text('Istoric service', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          ),
+        ),
+        Expanded(
+          child: _serviceRecords.isEmpty
+              ? const Center(child: Text('Nicio intervenție înregistrată'))
+              : ListView.builder(
+                  itemCount: _serviceRecords.length,
+                  itemBuilder: (context, index) {
+                    final record = _serviceRecords[index];
+                    final dateStr = DateFormat('dd.MM.yyyy').format(record.date);
+                    return ListTile(
+                      leading: CircleAvatar(
+                        child: Icon(_serviceIcons[record.type] ?? Icons.build),
+                      ),
+                      title: Text('${_serviceLabels[record.type]} — $dateStr'),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Km: ${record.odometerKm.toStringAsFixed(0)}'),
+                          if (record.description.isNotEmpty)
+                            Text(record.description, maxLines: 2, overflow: TextOverflow.ellipsis),
+                          if (record.cost != null)
+                            Text('Cost: ${record.cost!.toStringAsFixed(2)} MDL', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                      isThreeLine: true,
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete_outline, color: Colors.red),
+                        onPressed: () => _deleteServiceRecord(record),
+                      ),
+                      onTap: () => _editServiceRecord(record),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+}
 }

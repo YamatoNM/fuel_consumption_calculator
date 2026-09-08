@@ -7,11 +7,13 @@ import '../services/storage_service.dart';
 class AddServiceRecordScreen extends StatefulWidget {
   final Vehicle vehicle;
   final double lastOdometer;
+  final ServiceRecord? existingRecord;
 
   const AddServiceRecordScreen({
     super.key,
     required this.vehicle,
     required this.lastOdometer,
+    this.existingRecord,
   });
 
   @override
@@ -22,8 +24,8 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
   final _formKey = GlobalKey<FormState>();
   final _storageService = StorageService();
 
-  ServiceType _selectedType = ServiceType.uleiMotor;
-  DateTime _selectedDate = DateTime.now();
+  late ServiceType _selectedType;
+  late DateTime _selectedDate;
   final _odoController = TextEditingController();
   final _descController = TextEditingController();
   final _costController = TextEditingController();
@@ -34,7 +36,19 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
   @override
   void initState() {
     super.initState();
-    _odoController.text = widget.lastOdometer.toStringAsFixed(0);
+    if (widget.existingRecord != null) {
+      _selectedType = widget.existingRecord!.type;
+      _selectedDate = widget.existingRecord!.date;
+      _odoController.text = widget.existingRecord!.odometerKm.toStringAsFixed(0);
+      _descController.text = widget.existingRecord!.description;
+      _costController.text = widget.existingRecord!.cost?.toString() ?? '';
+      _nextDueKmController.text = widget.existingRecord!.nextDueKm?.toString() ?? '';
+      _nextDueDate = widget.existingRecord!.nextDueDate;
+    } else {
+      _selectedType = ServiceType.uleiMotor;
+      _selectedDate = DateTime.now();
+      _odoController.text = widget.lastOdometer.toStringAsFixed(0);
+    }
   }
 
   @override
@@ -80,7 +94,7 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
   void _save() async {
     if (_formKey.currentState!.validate()) {
       final record = ServiceRecord(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        id: widget.existingRecord?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
         vehicleId: widget.vehicle.id,
         date: _selectedDate,
         odometerKm: double.parse(_odoController.text),
@@ -91,7 +105,14 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
         nextDueDate: _nextDueDate,
       );
 
+      if (widget.existingRecord != null) {
+        // Update logic: we need a way to update in StorageService.
+        // For simplicity, let's just delete the old one and add the new one, 
+        // or add an updateMethod to StorageService.
+        await _storageService.deleteServiceRecord(widget.existingRecord!.id);
+      }
       await _storageService.addServiceRecord(record);
+      
       if (mounted) {
         Navigator.pop(context, true);
       }
