@@ -3,10 +3,15 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
+enum AiScanContext {
+  odometer,
+  fuelReceipt,
+  serviceReceipt,
+}
+
 class AiOcrService {
-  /// Scans an image and returns extracted JSON data.
-  /// [isOdometer] defines if we are looking for odometer reading or receipt data.
-  Future<Map<String, dynamic>?> scanImage(File imageFile, bool isOdometer) async {
+  /// Scans an image and returns extracted JSON data based on the provided context.
+  Future<Map<String, dynamic>?> scanImage(File imageFile, AiScanContext context) async {
     final String apiKey = dotenv.maybeGet('GEMINI_API_KEY') ?? '';
     
     if (apiKey.isEmpty || apiKey == 'YOUR_API_KEY_HERE') {
@@ -17,9 +22,18 @@ class AiOcrService {
       final bytes = await imageFile.readAsBytes();
       final base64Image = base64Encode(bytes);
 
-      final prompt = isOdometer
-          ? 'Identify and extract the TOTAL odometer reading (ODO) from this car dashboard image. Focus on the highest numerical value that represents the total distance traveled by the vehicle, ignoring any temporary trip meters (Trip A or Trip B). Return ONLY a JSON object: {"odometer_km": value, "confidence": "high"|"low"}.'
-          : 'Extract the fuel quantity in liters and the unit price per liter from this fuel receipt. Return ONLY a JSON object: {"fuel_liters": value, "price_per_liter": value, "confidence": "high"|"low"}.';
+      String prompt = '';
+      switch (context) {
+        case AiScanContext.odometer:
+          prompt = 'Identify and extract the TOTAL odometer reading (ODO) from this car dashboard image. Focus on the highest numerical value that represents the total distance traveled by the vehicle, ignoring any temporary trip meters (Trip A or Trip B). Return ONLY a JSON object: {"odometer_km": value, "confidence": "high"|"low"}.';
+          break;
+        case AiScanContext.fuelReceipt:
+          prompt = 'Extract the fuel quantity in liters and the unit price per liter from this fuel receipt. Return ONLY a JSON object: {"fuel_liters": value, "price_per_liter": value, "confidence": "high"|"low"}.';
+          break;
+        case AiScanContext.serviceReceipt:
+          prompt = 'Extract the total cost, the date of service, and a short summary of work done from this car service receipt or invoice. If this is a Technical Inspection (T.O.) or Insurance document, also look for the expiration or "valid until" date. Return ONLY a JSON object: {"cost": value, "date": "YYYY-MM-DD", "description": "text", "validUntilDate": "YYYY-MM-DD"|null, "confidence": "high"|"low"}.';
+          break;
+      }
 
       final url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey';
 

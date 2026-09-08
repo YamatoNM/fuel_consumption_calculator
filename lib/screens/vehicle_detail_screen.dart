@@ -123,7 +123,6 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
     );
 
     if (source == null && _currentVehicle.photoPath != null) {
-      // Logic for deleting photo would go here, updating the vehicle
       final vehicles = await _storageService.getVehicles();
       final idx = vehicles.indexWhere((v) => v.id == _currentVehicle.id);
       if (idx != -1) {
@@ -188,7 +187,8 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
     setState(() => _isProcessingAi = true);
 
     try {
-      final data = await _aiService.scanImage(File(photo.path), isOdometer);
+      final contextType = isOdometer ? AiScanContext.odometer : AiScanContext.fuelReceipt;
+      final data = await _aiService.scanImage(File(photo.path), contextType);
       if (data != null) {
         if (isOdometer && data['odometer_km'] != null) {
           _odoController.text = data['odometer_km'].toString();

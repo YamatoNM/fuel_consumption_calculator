@@ -7,6 +7,9 @@ import 'package:path/path.dart' as p;
 import '../models/service_record.dart';
 import '../models/vehicle.dart';
 import '../services/storage_service.dart';
+import '../services/ai_ocr_service.dart';
+
+class AddServiceRecordScreen extends StatefulWidget {
 
 class AddServiceRecordScreen extends StatefulWidget {
   final Vehicle vehicle;
@@ -27,6 +30,7 @@ class AddServiceRecordScreen extends StatefulWidget {
 class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
   final _formKey = GlobalKey<FormState>();
   final _storageService = StorageService();
+  final _aiService = AiOcrService();
   final _picker = ImagePicker();
 
   late ServiceType _selectedType;
@@ -38,6 +42,7 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
   final _nextDueKmController = TextEditingController();
   DateTime? _nextDueDate;
   String? _receiptPhotoPath;
+  bool _isScanning = false;
 
   @override
   void initState() {
@@ -94,6 +99,46 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
       setState(() {
         _receiptPhotoPath = savedImage.path;
       });
+    }
+  }
+
+  Future<void> _scanReceipt() async {
+    if (_receiptPhotoPath == null) return;
+
+    setState(() => _isScanning = true);
+
+    try {
+      final data = await _aiService.scanImage(File(_receiptPhotoPath!), AiScanContext.serviceReceipt);
+      if (data != null) {
+        setState(() {
+          if (data['cost'] != null) _costController.text = data['cost'].toString();
+          if (data['description'] != null) _descController.text = data['description'].toString();
+          if (data['date'] != null) {
+            try {
+              _selectedDate = DateTime.parse(data['date']);
+            } catch (_) {}
+          }
+          if (data['validUntilDate'] != null) {
+            try {
+              _nextDueDate = DateTime.parse(data['validUntilDate']);
+            } catch (_) {}
+          }
+        });
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Date extrase cu AI (${data['confidence']})')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Eroare la scanare: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      setState(() => _isScanning = false);
     }
   }
 
@@ -274,19 +319,36 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
               const Text('Poză bon/document', style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               if (_receiptPhotoPath != null)
-                Stack(
+                Column(
                   children: [
-                    Image.file(File(_receiptPhotoPath!), height: 150, width: double.infinity, fit: BoxFit.cover),
-                    Positioned(
-                      right: 8, top: 8,
-                      child: CircleAvatar(
-                        backgroundColor: Colors.red,
-                        child: IconButton(
-                          icon: const Icon(Icons.delete, color: Colors.white),
-                          onPressed: () => setState(() => _receiptPhotoPath = null),
+                    Stack(
+                      children: [
+                        Image.file(File(_receiptPhotoPath!), height: 150, width: double.infinity, fit: BoxFit.cover),
+                        Positioned(
+                          right: 8, top: 8,
+                          child: CircleAvatar(
+                            backgroundColor: Colors.red,
+                            child: IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.white),
+                              onPressed: () => setState(() => _receiptPhotoPath = null),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    if (_isScanning)
+                      const LinearProgressIndicator()
+                    else
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: _scanReceipt,
+                          icon: const Icon(Icons.auto_awesome),
+                          label: const Text('Scanează cu AI (Cost, Dată, Descriere)'),
+                          style: OutlinedButton.styleFrom(foregroundColor: Colors.blue),
                         ),
                       ),
-                    ),
                   ],
                 )
               else
