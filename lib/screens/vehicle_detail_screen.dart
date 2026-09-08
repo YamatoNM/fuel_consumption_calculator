@@ -2,6 +2,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
 import '../models/vehicle.dart';
 import '../models/consumption_entry.dart';
 import '../models/service_record.dart';
@@ -63,25 +65,18 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     
-    // Fetch latest vehicle state (might have changed expiry dates)
     final vehicles = await _storageService.getVehicles();
     final updatedV = vehicles.firstWhere((v) => v.id == widget.vehicle.id);
-
-    // Fetch fuel entries
     final entries = await _storageService.getEntriesForVehicle(widget.vehicle.id);
     entries.sort((a, b) => b.date.compareTo(a.date));
-
-    // Fetch service records
     final services = await _storageService.getServiceRecords(widget.vehicle.id);
     services.sort((a, b) => b.date.compareTo(a.date));
 
-    // Aggregate statistics
     final totalFuel = await _storageService.getTotalFuelCost(widget.vehicle.id);
     final totalService = await _storageService.getTotalServiceCost(widget.vehicle.id);
     final serviceByType = await _storageService.getServiceCostByType(widget.vehicle.id);
     final yearly = await _storageService.getExpensesByYear(widget.vehicle.id);
 
-    // Fetch live price
     final price = await _priceService.getLivePrice(updatedV.fuelType);
     
     setState(() {
@@ -98,6 +93,73 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
       }
       _isLoading = false;
     });
+  }
+
+  Future<void> _updateVehiclePhoto() async {
+    final ImageSource? source = await showModalBottomSheet<ImageSource?>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt),
+              title: const Text('Fă poză'),
+              onTap: () => Navigator.pop(context, ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library),
+              title: const Text('Alege din galerie'),
+              onTap: () => Navigator.pop(context, ImageSource.gallery),
+            ),
+            if (_currentVehicle.photoPath != null)
+              ListTile(
+                leading: const Icon(Icons.delete, color: Colors.red),
+                title: const Text('Șterge poza'),
+                onTap: () => Navigator.pop(context, null),
+              ),
+          ],
+        ),
+      ),
+    );
+
+    if (source == null && _currentVehicle.photoPath != null) {
+      // Logic for deleting photo would go here, updating the vehicle
+      final vehicles = await _storageService.getVehicles();
+      final idx = vehicles.indexWhere((v) => v.id == _currentVehicle.id);
+      if (idx != -1) {
+        final v = vehicles[idx];
+        vehicles[idx] = Vehicle(
+          id: v.id, name: v.name, initialOdometer: v.initialOdometer, fuelType: v.fuelType,
+          oilEngineIntervalKm: v.oilEngineIntervalKm, oilGearboxIntervalKm: v.oilGearboxIntervalKm,
+          technicalInspectionExpiryDate: v.technicalInspectionExpiryDate, rcaExpiryDate: v.rcaExpiryDate,
+          photoPath: null
+        );
+        await _storageService.saveVehicles(vehicles);
+        _loadData();
+      }
+      return;
+    } else if (source != null) {
+      final XFile? pickedFile = await _picker.pickImage(source: source);
+      if (pickedFile != null) {
+        final appDir = await getApplicationDocumentsDirectory();
+        final fileName = 'car_${_currentVehicle.id}${p.extension(pickedFile.path)}';
+        final savedImage = await File(pickedFile.path).copy('${appDir.path}/$fileName');
+        
+        final vehicles = await _storageService.getVehicles();
+        final idx = vehicles.indexWhere((v) => v.id == _currentVehicle.id);
+        if (idx != -1) {
+          final v = vehicles[idx];
+          vehicles[idx] = Vehicle(
+            id: v.id, name: v.name, initialOdometer: v.initialOdometer, fuelType: v.fuelType,
+            oilEngineIntervalKm: v.oilEngineIntervalKm, oilGearboxIntervalKm: v.oilGearboxIntervalKm,
+            technicalInspectionExpiryDate: v.technicalInspectionExpiryDate, rcaExpiryDate: v.rcaExpiryDate,
+            photoPath: savedImage.path
+          );
+          await _storageService.saveVehicles(vehicles);
+          _loadData();
+        }
+      }
+    }
   }
 
   Future<void> _captureAndScan(bool isOdometer) async {
@@ -160,7 +222,6 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
       final double fuel = double.parse(_fuelController.text);
       final double pricePerLiter = double.tryParse(_priceController.text) ?? _livePrice ?? 0.0;
 
-      // Get last odometer
       double lastOdo = _entries.isNotEmpty ? _entries.first.odometerKm : _currentVehicle.initialOdometer;
 
       if (currentOdo <= lastOdo) {
@@ -235,6 +296,21 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
     }
   }
 
+  void _viewReceipt(String path) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Image.file(File(path)),
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Închide')),
+          ],
+        ),
+      ),
+    );
+  }
+
   final Map<ServiceType, IconData> _serviceIcons = {
     ServiceType.uleiMotor: Icons.oil_barrel,
     ServiceType.uleiCutie: Icons.settings_input_component,
@@ -271,20 +347,29 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
       length: 3,
       child: Scaffold(
         appBar: AppBar(
-          title: Text(_currentVehicle.name),
+          title: Row(
+            children: [
+              GestureDetector(
+                onTap: _updateVehiclePhoto,
+                child: CircleAvatar(
+                  radius: 18,
+                  backgroundImage: _currentVehicle.photoPath != null ? FileImage(File(_currentVehicle.photoPath!)) : null,
+                  child: _currentVehicle.photoPath == null ? const Icon(Icons.directions_car, size: 20) : null,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(child: Text(_currentVehicle.name, overflow: TextOverflow.ellipsis)),
+            ],
+          ),
           actions: [
             IconButton(
               icon: const Icon(Icons.settings),
               onPressed: () async {
                 final result = await Navigator.push(
                   context,
-                  MaterialPageRoute(
-                    builder: (context) => VehicleSettingsScreen(vehicle: _currentVehicle),
-                  ),
+                  MaterialPageRoute(builder: (context) => VehicleSettingsScreen(vehicle: _currentVehicle)),
                 );
-                if (result == true) {
-                  _loadData();
-                }
+                if (result == true) _loadData();
               },
               tooltip: 'Setări automobil',
             ),
@@ -393,9 +478,7 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
 
   Widget _buildYearlyBreakdownCard() {
     if (_yearlyExpenses.isEmpty) return const SizedBox();
-    
     final sortedYears = _yearlyExpenses.keys.toList()..sort((a, b) => b.compareTo(a));
-
     return Card(
       elevation: 4,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -418,10 +501,7 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text('Anul $year', style: const TextStyle(fontSize: 16)),
-                    Text(
-                      '${total.toStringAsFixed(2)} MDL',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                    ),
+                    Text('${total.toStringAsFixed(2)} MDL', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                   ],
                 );
               },
@@ -462,11 +542,9 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
   Widget _buildStatusRow({required String title, required DateTime? date, required IconData icon}) {
     Color statusColor = Colors.grey;
     String statusText = 'Neconfigurat';
-    
     if (date != null) {
       final daysLeft = date.difference(DateTime.now()).inDays;
       statusText = DateFormat('dd.MM.yyyy').format(date);
-      
       if (daysLeft < 0) {
         statusColor = Colors.red;
         statusText += ' (Expirat)';
@@ -477,7 +555,6 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
         statusColor = Colors.green;
       }
     }
-
     return Row(
       children: [
         Icon(icon, color: statusColor, size: 32),
@@ -498,7 +575,6 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
   Widget _buildFuelTab() {
     return Column(
       children: [
-        // Input Mode Toggle
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
           child: SegmentedButton<bool>(
@@ -510,8 +586,6 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
             onSelectionChanged: (val) => setState(() => _isManualMode = val.first),
           ),
         ),
-
-        // Form Section
         Padding(
           padding: const EdgeInsets.all(16.0),
           child: Card(
@@ -589,14 +663,10 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
             ),
           ),
         ),
-
-        // History Header
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: 16.0),
           child: Align(alignment: Alignment.centerLeft, child: Text('Istoric înregistrări', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
         ),
-
-        // History List
         Expanded(
           child: _entries.isEmpty
               ? const Center(child: Text('Nicio înregistrare încă'))
@@ -605,12 +675,8 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
                   itemBuilder: (context, index) {
                     final entry = _entries[index];
                     final dateStr = DateFormat('dd.MM.yyyy').format(entry.date);
-                    // Calc distance for display
-                    double prevOdo = (index + 1 < _entries.length) 
-                        ? _entries[index + 1].odometerKm 
-                        : _currentVehicle.initialOdometer;
+                    double prevOdo = (index + 1 < _entries.length) ? _entries[index + 1].odometerKm : _currentVehicle.initialOdometer;
                     double dist = entry.odometerKm - prevOdo;
-
                     return ListTile(
                       leading: const Icon(Icons.history),
                       title: Text('$dateStr — Odo: ${entry.odometerKm} km'),
@@ -648,9 +714,7 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
                     ),
                   ),
                 );
-                if (result == true) {
-                  _loadData();
-                }
+                if (result == true) _loadData();
               },
               icon: const Icon(Icons.add),
               label: const Text('Adaugă intervenție'),
@@ -688,9 +752,19 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
                         ],
                       ),
                       isThreeLine: true,
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete_outline, color: Colors.red),
-                        onPressed: () => _deleteServiceRecord(record),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (record.receiptPhotoPath != null)
+                            IconButton(
+                              icon: const Icon(Icons.image, color: Colors.blue),
+                              onPressed: () => _viewReceipt(record.receiptPhotoPath!),
+                            ),
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, color: Colors.red),
+                            onPressed: () => _deleteServiceRecord(record),
+                          ),
+                        ],
                       ),
                       onTap: () => _editServiceRecord(record),
                     );

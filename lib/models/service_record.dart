@@ -23,6 +23,7 @@ class ServiceRecord {
   final double? cost;
   final double? nextDueKm;
   final DateTime? nextDueDate;
+  final String? receiptPhotoPath;
 
   ServiceRecord({
     required this.id,
@@ -34,6 +35,7 @@ class ServiceRecord {
     this.cost,
     this.nextDueKm,
     this.nextDueDate,
+    this.receiptPhotoPath,
   });
 
   Map<String, dynamic> toJson() => {
@@ -46,17 +48,19 @@ class ServiceRecord {
         'cost': cost,
         'nextDueKm': nextDueKm,
         'nextDueDate': nextDueDate?.toIso8601String(),
+        'receiptPhotoPath': receiptPhotoPath,
       };
 
   factory ServiceRecord.fromJson(Map<String, dynamic> json) => ServiceRecord(
         id: json['id'],
         vehicleId: json['vehicleId'],
         date: DateTime.parse(json['date']),
-        odometerKm: (json['odometerKm'] as num).toDouble(),
+        odometerKm: (json['odometerKm'] as num? ?? 0.0).toDouble(),
         type: ServiceType.values.byName(json['type']),
         description: json['description'],
         cost: json['cost'] != null ? (json['cost'] as num).toDouble() : null,
         nextDueKm: json['nextDueKm'] != null ? (json['nextDueKm'] as num).toDouble() : null,
         nextDueDate: json['nextDueDate'] != null ? DateTime.parse(json['nextDueDate']) : null,
+        receiptPhotoPath: json['receiptPhotoPath'],
       );
 }

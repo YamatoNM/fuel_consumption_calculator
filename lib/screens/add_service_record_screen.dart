@@ -1,5 +1,9 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
 import '../models/service_record.dart';
 import '../models/vehicle.dart';
 import '../services/storage_service.dart';
@@ -23,6 +27,7 @@ class AddServiceRecordScreen extends StatefulWidget {
 class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
   final _formKey = GlobalKey<FormState>();
   final _storageService = StorageService();
+  final _picker = ImagePicker();
 
   late ServiceType _selectedType;
   late DateTime _selectedDate;
@@ -32,6 +37,7 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
   
   final _nextDueKmController = TextEditingController();
   DateTime? _nextDueDate;
+  String? _receiptPhotoPath;
 
   @override
   void initState() {
@@ -44,6 +50,7 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
       _costController.text = widget.existingRecord!.cost?.toString() ?? '';
       _nextDueKmController.text = widget.existingRecord!.nextDueKm?.toString() ?? '';
       _nextDueDate = widget.existingRecord!.nextDueDate;
+      _receiptPhotoPath = widget.existingRecord!.receiptPhotoPath;
     } else {
       _selectedType = ServiceType.uleiMotor;
       _selectedDate = DateTime.now();
@@ -77,6 +84,18 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
 
   bool get _isExpiryType => 
     _selectedType == ServiceType.revizieTehnica || _selectedType == ServiceType.asigurareRCA;
+
+  Future<void> _pickImage(ImageSource source) async {
+    final XFile? pickedFile = await _picker.pickImage(source: source);
+    if (pickedFile != null) {
+      final appDir = await getApplicationDocumentsDirectory();
+      final fileName = 'receipt_${DateTime.now().millisecondsSinceEpoch}${p.extension(pickedFile.path)}';
+      final savedImage = await File(pickedFile.path).copy('${appDir.path}/$fileName');
+      setState(() {
+        _receiptPhotoPath = savedImage.path;
+      });
+    }
+  }
 
   Future<void> _selectDate(BuildContext context, bool isNextDue) async {
     final DateTime? picked = await showDatePicker(
@@ -115,6 +134,7 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
         cost: double.tryParse(_costController.text),
         nextDueKm: double.tryParse(_nextDueKmController.text),
         nextDueDate: _nextDueDate,
+        receiptPhotoPath: _receiptPhotoPath,
       );
 
       // Save record
@@ -142,6 +162,7 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
             rcaExpiryDate: _selectedType == ServiceType.asigurareRCA 
                 ? _nextDueDate 
                 : v.rcaExpiryDate,
+            photoPath: v.photoPath,
           );
           await _storageService.saveVehicles(vehicles);
         }
@@ -182,7 +203,6 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
                 onChanged: (val) {
                   setState(() {
                     _selectedType = val!;
-                    // Auto-calculate nextDueKm for oil changes
                     if (val == ServiceType.uleiMotor) {
                       final currentKm = double.tryParse(_odoController.text) ?? 0;
                       _nextDueKmController.text = (currentKm + widget.vehicle.oilEngineIntervalKm).toStringAsFixed(0);
@@ -195,7 +215,6 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
               ),
               const SizedBox(height: 16),
 
-              // Date Picker
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Data intervenției'),
@@ -209,7 +228,6 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
               ),
               const SizedBox(height: 16),
 
-              // Odometer
               TextFormField(
                 controller: _odoController,
                 keyboardType: TextInputType.number,
@@ -230,7 +248,6 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
               ),
               const SizedBox(height: 16),
 
-              // Description
               TextFormField(
                 controller: _descController,
                 maxLines: 3,
@@ -242,7 +259,6 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
               ),
               const SizedBox(height: 16),
 
-              // Cost
               TextFormField(
                 controller: _costController,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -252,9 +268,45 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
                   prefixIcon: Icon(Icons.payments),
                 ),
               ),
+              const SizedBox(height: 16),
+
+              // Photo section
+              const Text('Poză bon/document', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              if (_receiptPhotoPath != null)
+                Stack(
+                  children: [
+                    Image.file(File(_receiptPhotoPath!), height: 150, width: double.infinity, fit: BoxFit.cover),
+                    Positioned(
+                      right: 8, top: 8,
+                      child: CircleAvatar(
+                        backgroundColor: Colors.red,
+                        child: IconButton(
+                          icon: const Icon(Icons.delete, color: Colors.white),
+                          onPressed: () => setState(() => _receiptPhotoPath = null),
+                        ),
+                      ),
+                    ),
+                  ],
+                )
+              else
+                Row(
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: () => _pickImage(ImageSource.camera),
+                      icon: const Icon(Icons.camera_alt),
+                      label: const Text('Cameră'),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      onPressed: () => _pickImage(ImageSource.gallery),
+                      icon: const Icon(Icons.photo_library),
+                      label: const Text('Galerie'),
+                    ),
+                  ],
+                ),
               const SizedBox(height: 24),
 
-              // Reminder Section
               Theme(
                 data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
                 child: ExpansionTile(
@@ -279,7 +331,6 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
                               decoration: const InputDecoration(
                                 labelText: 'Următoarea la km',
                                 border: OutlineInputBorder(),
-                                helperText: 'Ex: peste 10.000 km',
                               ),
                             ),
                             const SizedBox(height: 16),
@@ -303,11 +354,6 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
                               borderRadius: BorderRadius.circular(4),
                             ),
                           ),
-                          if (_isExpiryType && _nextDueDate == null)
-                             const Padding(
-                               padding: EdgeInsets.only(top: 8.0),
-                               child: Text('Data de expirare este obligatorie.', style: TextStyle(color: Colors.red, fontSize: 12)),
-                             ),
                         ],
                       ),
                     ),
@@ -316,7 +362,6 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
               ),
               const SizedBox(height: 32),
 
-              // Save Button
               SizedBox(
                 width: double.infinity,
                 height: 50,

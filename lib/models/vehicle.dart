@@ -7,6 +7,7 @@ class Vehicle {
   final double? oilGearboxIntervalKm;
   final DateTime? technicalInspectionExpiryDate;
   final DateTime? rcaExpiryDate;
+  final String? photoPath;
 
   Vehicle({
     required this.id,
@@ -17,6 +18,7 @@ class Vehicle {
     this.oilGearboxIntervalKm,
     this.technicalInspectionExpiryDate,
     this.rcaExpiryDate,
+    this.photoPath,
   });
 
   Map<String, dynamic> toJson() => {
@@ -28,6 +30,7 @@ class Vehicle {
         'oilGearboxIntervalKm': oilGearboxIntervalKm,
         'technicalInspectionExpiryDate': technicalInspectionExpiryDate?.toIso8601String(),
         'rcaExpiryDate': rcaExpiryDate?.toIso8601String(),
+        'photoPath': photoPath,
       };
 
   factory Vehicle.fromJson(Map<String, dynamic> json) => Vehicle(
@@ -45,5 +48,6 @@ class Vehicle {
         rcaExpiryDate: json['rcaExpiryDate'] != null 
             ? DateTime.parse(json['rcaExpiryDate']) 
             : null,
+        photoPath: json['photoPath'],
       );
 }

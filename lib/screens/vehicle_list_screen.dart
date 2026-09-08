@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../models/vehicle.dart';
 import '../services/storage_service.dart';
@@ -94,7 +95,14 @@ class _VehicleListScreenState extends State<VehicleListScreen> {
                     final count = _entryCounts[vehicle.id] ?? 0;
                     return Card(
                       child: ListTile(
-                        leading: const CircleAvatar(child: Icon(Icons.directions_car)),
+                        leading: CircleAvatar(
+                          backgroundImage: vehicle.photoPath != null 
+                              ? FileImage(File(vehicle.photoPath!)) 
+                              : null,
+                          child: vehicle.photoPath == null 
+                              ? const Icon(Icons.directions_car) 
+                              : null,
+                        ),
                         title: Text(vehicle.name, style: const TextStyle(fontWeight: FontWeight.bold)),
                         subtitle: Text('$count înregistrări'),
                         trailing: IconButton(
