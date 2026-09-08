@@ -21,7 +21,7 @@ class AiOcrService {
           ? 'Extract the current total odometer reading (total kilometers) from this dashboard image. Return ONLY a JSON object: {"odometer_km": value, "confidence": "high"|"low"}.'
           : 'Extract the fuel quantity in liters and the price per liter from this fuel receipt. Return ONLY a JSON object: {"fuel_liters": value, "price_per_liter": value, "confidence": "high"|"low"}.';
 
-      final url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$_apiKey';
+      final url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey';
 
       final body = jsonEncode({
         "contents": [
