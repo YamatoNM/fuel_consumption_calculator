@@ -5,6 +5,8 @@ class Vehicle {
   final String fuelType; // "Motorină" or "Benzină"
   final double oilEngineIntervalKm;
   final double? oilGearboxIntervalKm;
+  final DateTime? technicalInspectionExpiryDate;
+  final DateTime? rcaExpiryDate;
 
   Vehicle({
     required this.id,
@@ -13,6 +15,8 @@ class Vehicle {
     required this.fuelType,
     this.oilEngineIntervalKm = 10000,
     this.oilGearboxIntervalKm,
+    this.technicalInspectionExpiryDate,
+    this.rcaExpiryDate,
   });
 
   Map<String, dynamic> toJson() => {
@@ -22,6 +26,8 @@ class Vehicle {
         'fuelType': fuelType,
         'oilEngineIntervalKm': oilEngineIntervalKm,
         'oilGearboxIntervalKm': oilGearboxIntervalKm,
+        'technicalInspectionExpiryDate': technicalInspectionExpiryDate?.toIso8601String(),
+        'rcaExpiryDate': rcaExpiryDate?.toIso8601String(),
       };
 
   factory Vehicle.fromJson(Map<String, dynamic> json) => Vehicle(
@@ -32,6 +38,12 @@ class Vehicle {
         oilEngineIntervalKm: (json['oilEngineIntervalKm'] as num? ?? 10000.0).toDouble(),
         oilGearboxIntervalKm: json['oilGearboxIntervalKm'] != null 
             ? (json['oilGearboxIntervalKm'] as num).toDouble() 
+            : null,
+        technicalInspectionExpiryDate: json['technicalInspectionExpiryDate'] != null 
+            ? DateTime.parse(json['technicalInspectionExpiryDate']) 
+            : null,
+        rcaExpiryDate: json['rcaExpiryDate'] != null 
+            ? DateTime.parse(json['rcaExpiryDate']) 
             : null,
       );
 }

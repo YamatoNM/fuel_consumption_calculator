@@ -70,9 +70,13 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
     ServiceType.frane: "Frâne",
     ServiceType.baterie: "Baterie",
     ServiceType.revizieTehnica: "Revizie tehnică (T.O.)",
+    ServiceType.asigurareRCA: "Asigurare RCA",
     ServiceType.reparatie: "Reparație",
     ServiceType.altul: "Altul",
   };
+
+  bool get _isExpiryType => 
+    _selectedType == ServiceType.revizieTehnica || _selectedType == ServiceType.asigurareRCA;
 
   Future<void> _selectDate(BuildContext context, bool isNextDue) async {
     final DateTime? picked = await showDatePicker(
@@ -94,6 +98,13 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
 
   void _save() async {
     if (_formKey.currentState!.validate()) {
+      if (_isExpiryType && _nextDueDate == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Te rugăm să selectezi data de expirare (Valabil până la).')),
+        );
+        return;
+      }
+
       final record = ServiceRecord(
         id: widget.existingRecord?.id ?? DateTime.now().millisecondsSinceEpoch.toString(),
         vehicleId: widget.vehicle.id,
@@ -106,13 +117,35 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
         nextDueDate: _nextDueDate,
       );
 
+      // Save record
       if (widget.existingRecord != null) {
-        // Update logic: we need a way to update in StorageService.
-        // For simplicity, let's just delete the old one and add the new one, 
-        // or add an updateMethod to StorageService.
         await _storageService.deleteServiceRecord(widget.existingRecord!.id);
       }
       await _storageService.addServiceRecord(record);
+
+      // Update Vehicle status if it's T.O. or RCA
+      if (_isExpiryType) {
+        final vehicles = await _storageService.getVehicles();
+        final idx = vehicles.indexWhere((v) => v.id == widget.vehicle.id);
+        if (idx != -1) {
+          final v = vehicles[idx];
+          vehicles[idx] = Vehicle(
+            id: v.id,
+            name: v.name,
+            initialOdometer: v.initialOdometer,
+            fuelType: v.fuelType,
+            oilEngineIntervalKm: v.oilEngineIntervalKm,
+            oilGearboxIntervalKm: v.oilGearboxIntervalKm,
+            technicalInspectionExpiryDate: _selectedType == ServiceType.revizieTehnica 
+                ? _nextDueDate 
+                : v.technicalInspectionExpiryDate,
+            rcaExpiryDate: _selectedType == ServiceType.asigurareRCA 
+                ? _nextDueDate 
+                : v.rcaExpiryDate,
+          );
+          await _storageService.saveVehicles(vehicles);
+        }
+      }
       
       if (mounted) {
         Navigator.pop(context, true);
@@ -124,7 +157,7 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Adaugă Service'),
+        title: Text(widget.existingRecord == null ? 'Adaugă Service' : 'Editează Service'),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
@@ -225,40 +258,56 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
               Theme(
                 data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
                 child: ExpansionTile(
-                  title: const Text('Setează reamintire', style: TextStyle(fontWeight: FontWeight.bold)),
-                  leading: const Icon(Icons.notifications_active, color: Colors.blue),
+                  initiallyExpanded: _isExpiryType,
+                  title: Text(
+                    _isExpiryType ? 'Valabilitate document' : 'Setează reamintire', 
+                    style: const TextStyle(fontWeight: FontWeight.bold)
+                  ),
+                  leading: Icon(
+                    _isExpiryType ? Icons.verified_user : Icons.notifications_active, 
+                    color: _isExpiryType ? Colors.green : Colors.blue
+                  ),
                   children: [
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 8.0),
                       child: Column(
                         children: [
-                          TextFormField(
-                            controller: _nextDueKmController,
-                            keyboardType: TextInputType.number,
-                            decoration: const InputDecoration(
-                              labelText: 'Următoarea la km',
-                              border: OutlineInputBorder(),
-                              helperText: 'Ex: peste 10.000 km',
+                          if (!_isExpiryType) ...[
+                            TextFormField(
+                              controller: _nextDueKmController,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(
+                                labelText: 'Următoarea la km',
+                                border: OutlineInputBorder(),
+                                helperText: 'Ex: peste 10.000 km',
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 16),
+                            const SizedBox(height: 16),
+                          ],
                           ListTile(
                             contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                            title: const Text('Următoarea la data'),
+                            title: Text(_isExpiryType ? 'Valabil până la (Data)' : 'Următoarea la data'),
                             subtitle: Text(_nextDueDate == null 
                                 ? 'Neselectat' 
                                 : DateFormat('dd.MM.yyyy').format(_nextDueDate!)),
-                            trailing: _nextDueDate != null 
+                            trailing: (_nextDueDate != null && !_isExpiryType)
                                 ? IconButton(
                                     icon: const Icon(Icons.clear), 
                                     onPressed: () => setState(() => _nextDueDate = null))
                                 : const Icon(Icons.calendar_month),
                             onTap: () => _selectDate(context, true),
                             shape: RoundedRectangleBorder(
-                              side: BorderSide(color: Colors.grey.shade400),
+                              side: BorderSide(
+                                color: (_isExpiryType && _nextDueDate == null) ? Colors.red : Colors.grey.shade400
+                              ),
                               borderRadius: BorderRadius.circular(4),
                             ),
                           ),
+                          if (_isExpiryType && _nextDueDate == null)
+                             const Padding(
+                               padding: EdgeInsets.only(top: 8.0),
+                               child: Text('Data de expirare este obligatorie.', style: TextStyle(color: Colors.red, fontSize: 12)),
+                             ),
                         ],
                       ),
                     ),
@@ -273,7 +322,7 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
                 height: 50,
                 child: ElevatedButton(
                   onPressed: _save,
-                  child: const Text('Salvează înregistrarea'),
+                  child: Text(widget.existingRecord == null ? 'Salvează înregistrarea' : 'Actualizează înregistrarea'),
                 ),
               ),
             ],

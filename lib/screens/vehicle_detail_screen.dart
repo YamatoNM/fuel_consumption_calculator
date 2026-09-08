@@ -30,6 +30,7 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
   final _fuelController = TextEditingController();
   final _priceController = TextEditingController();
 
+  late Vehicle _currentVehicle;
   List<ConsumptionEntry> _entries = [];
   List<ServiceRecord> _serviceRecords = [];
   bool _isLoading = true;
@@ -41,6 +42,7 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
   @override
   void initState() {
     super.initState();
+    _currentVehicle = widget.vehicle;
     _loadData();
   }
 
@@ -55,6 +57,10 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     
+    // Fetch latest vehicle state (might have changed expiry dates)
+    final vehicles = await _storageService.getVehicles();
+    final updatedV = vehicles.firstWhere((v) => v.id == widget.vehicle.id);
+
     // Fetch fuel entries
     final entries = await _storageService.getEntriesForVehicle(widget.vehicle.id);
     entries.sort((a, b) => b.date.compareTo(a.date));
@@ -64,9 +70,10 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
     services.sort((a, b) => b.date.compareTo(a.date));
 
     // Fetch live price
-    final price = await _priceService.getLivePrice(widget.vehicle.fuelType);
+    final price = await _priceService.getLivePrice(updatedV.fuelType);
     
     setState(() {
+      _currentVehicle = updatedV;
       _entries = entries;
       _serviceRecords = services;
       _livePrice = price;
@@ -138,7 +145,7 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
       final double pricePerLiter = double.tryParse(_priceController.text) ?? _livePrice ?? 0.0;
 
       // Get last odometer
-      double lastOdo = _entries.isNotEmpty ? _entries.first.odometerKm : widget.vehicle.initialOdometer;
+      double lastOdo = _entries.isNotEmpty ? _entries.first.odometerKm : _currentVehicle.initialOdometer;
 
       if (currentOdo <= lastOdo) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -153,7 +160,7 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
 
       final newEntry = ConsumptionEntry(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
-        vehicleId: widget.vehicle.id,
+        vehicleId: _currentVehicle.id,
         date: DateTime.now(),
         odometerKm: currentOdo,
         fuelLiters: fuel,
@@ -168,7 +175,6 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
         _currentResult = 'Consum: ${result.toStringAsFixed(2)} L/100km | Cost: ${totalCost.toStringAsFixed(2)} MDL';
         _odoController.clear();
         _fuelController.clear();
-        // Keep price as it might be live/cached
       });
       
       _loadData();
@@ -202,8 +208,8 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
       context,
       MaterialPageRoute(
         builder: (context) => AddServiceRecordScreen(
-          vehicle: widget.vehicle,
-          lastOdometer: _entries.isNotEmpty ? _entries.first.odometerKm : widget.vehicle.initialOdometer,
+          vehicle: _currentVehicle,
+          lastOdometer: _entries.isNotEmpty ? _entries.first.odometerKm : _currentVehicle.initialOdometer,
           existingRecord: record,
         ),
       ),
@@ -223,6 +229,7 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
     ServiceType.frane: Icons.settings_backup_restore,
     ServiceType.baterie: Icons.battery_charging_full,
     ServiceType.revizieTehnica: Icons.assignment,
+    ServiceType.asigurareRCA: Icons.verified_user,
     ServiceType.reparatie: Icons.build,
     ServiceType.altul: Icons.more_horiz,
   };
@@ -237,6 +244,7 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
     ServiceType.frane: "Frâne",
     ServiceType.baterie: "Baterie",
     ServiceType.revizieTehnica: "Revizie tehnică",
+    ServiceType.asigurareRCA: "Asigurare RCA",
     ServiceType.reparatie: "Reparație",
     ServiceType.altul: "Altul",
   };
@@ -244,10 +252,10 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
         appBar: AppBar(
-          title: Text(widget.vehicle.name),
+          title: Text(_currentVehicle.name),
           actions: [
             IconButton(
               icon: const Icon(Icons.settings),
@@ -255,7 +263,7 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
                 final result = await Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => VehicleSettingsScreen(vehicle: widget.vehicle),
+                    builder: (context) => VehicleSettingsScreen(vehicle: _currentVehicle),
                   ),
                 );
                 if (result == true) {
@@ -275,6 +283,7 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
           ],
           bottom: const TabBar(
             tabs: [
+              Tab(text: 'Prezentare', icon: Icon(Icons.info_outline)),
               Tab(text: 'Consum', icon: Icon(Icons.local_gas_station)),
               Tab(text: 'Service', icon: Icon(Icons.build)),
             ],
@@ -284,11 +293,88 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
             ? const Center(child: CircularProgressIndicator())
             : TabBarView(
                 children: [
+                  _buildOverviewTab(),
                   _buildFuelTab(),
                   _buildServiceTab(),
                 ],
               ),
       ),
+    );
+  }
+
+  Widget _buildOverviewTab() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        children: [
+          _buildStatusCard(),
+          const SizedBox(height: 20),
+          // Quick stats can go here later
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatusCard() {
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          children: [
+            const Text('Status Documente', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const Divider(height: 30),
+            _buildStatusRow(
+              title: 'Revizie Tehnică (T.O.)',
+              date: _currentVehicle.technicalInspectionExpiryDate,
+              icon: Icons.assignment_turned_in,
+            ),
+            const SizedBox(height: 20),
+            _buildStatusRow(
+              title: 'Asigurare RCA',
+              date: _currentVehicle.rcaExpiryDate,
+              icon: Icons.verified_user,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusRow({required String title, required DateTime? date, required IconData icon}) {
+    Color statusColor = Colors.grey;
+    String statusText = 'Neconfigurat';
+    
+    if (date != null) {
+      final daysLeft = date.difference(DateTime.now()).inDays;
+      statusText = DateFormat('dd.MM.yyyy').format(date);
+      
+      if (daysLeft < 0) {
+        statusColor = Colors.red;
+        statusText += ' (Expirat)';
+      } else if (daysLeft <= 30) {
+        statusColor = Colors.orange;
+        statusText += ' (Expiră curând)';
+      } else {
+        statusColor = Colors.green;
+      }
+    }
+
+    return Row(
+      children: [
+        Icon(icon, color: statusColor, size: 32),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: const TextStyle(fontWeight: FontWeight.w500)),
+              Text(statusText, style: TextStyle(color: statusColor, fontWeight: FontWeight.bold)),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -405,7 +491,7 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
                     // Calc distance for display
                     double prevOdo = (index + 1 < _entries.length) 
                         ? _entries[index + 1].odometerKm 
-                        : widget.vehicle.initialOdometer;
+                        : _currentVehicle.initialOdometer;
                     double dist = entry.odometerKm - prevOdo;
 
                     return ListTile(
@@ -440,8 +526,8 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
                   context,
                   MaterialPageRoute(
                     builder: (context) => AddServiceRecordScreen(
-                      vehicle: widget.vehicle,
-                      lastOdometer: _entries.isNotEmpty ? _entries.first.odometerKm : widget.vehicle.initialOdometer,
+                      vehicle: _currentVehicle,
+                      lastOdometer: _entries.isNotEmpty ? _entries.first.odometerKm : _currentVehicle.initialOdometer,
                     ),
                   ),
                 );

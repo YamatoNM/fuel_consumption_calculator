@@ -8,6 +8,7 @@ enum ServiceType {
   frane,
   baterie,
   revizieTehnica,
+  asigurareRCA,
   reparatie,
   altul,
 }
