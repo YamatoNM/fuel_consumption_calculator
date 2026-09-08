@@ -33,6 +33,12 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
   late Vehicle _currentVehicle;
   List<ConsumptionEntry> _entries = [];
   List<ServiceRecord> _serviceRecords = [];
+  
+  double _totalFuelCost = 0;
+  double _totalServiceCost = 0;
+  Map<ServiceType, double> _serviceCostByType = {};
+  Map<int, double> _yearlyExpenses = {};
+
   bool _isLoading = true;
   bool _isProcessingAi = false;
   bool _isManualMode = true;
@@ -69,6 +75,12 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
     final services = await _storageService.getServiceRecords(widget.vehicle.id);
     services.sort((a, b) => b.date.compareTo(a.date));
 
+    // Aggregate statistics
+    final totalFuel = await _storageService.getTotalFuelCost(widget.vehicle.id);
+    final totalService = await _storageService.getTotalServiceCost(widget.vehicle.id);
+    final serviceByType = await _storageService.getServiceCostByType(widget.vehicle.id);
+    final yearly = await _storageService.getExpensesByYear(widget.vehicle.id);
+
     // Fetch live price
     final price = await _priceService.getLivePrice(updatedV.fuelType);
     
@@ -76,6 +88,10 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
       _currentVehicle = updatedV;
       _entries = entries;
       _serviceRecords = services;
+      _totalFuelCost = totalFuel;
+      _totalServiceCost = totalService;
+      _serviceCostByType = serviceByType;
+      _yearlyExpenses = yearly;
       _livePrice = price;
       if (price != null) {
         _priceController.text = price.toStringAsFixed(2);
@@ -309,8 +325,109 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
         children: [
           _buildStatusCard(),
           const SizedBox(height: 20),
-          // Quick stats can go here later
+          _buildExpenseSummaryCard(),
+          const SizedBox(height: 20),
+          _buildYearlyBreakdownCard(),
         ],
+      ),
+    );
+  }
+
+  Widget _buildExpenseSummaryCard() {
+    final totalGeneral = _totalFuelCost + _totalServiceCost;
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Rezumat Cheltuieli', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const Divider(height: 30),
+            _buildExpenseRow('Combustibil', _totalFuelCost, color: Colors.blue),
+            _buildExpenseRow('Service total', _totalServiceCost, color: Colors.orange),
+            const Divider(),
+            _buildExpenseRow('Total General', totalGeneral, color: Colors.green, isBold: true),
+            
+            if (_serviceCostByType.isNotEmpty) ...[
+              const SizedBox(height: 20),
+              const Text('Defalcare Service:', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 10),
+              ..._serviceCostByType.entries.map((e) => Padding(
+                padding: const EdgeInsets.only(left: 8.0, bottom: 4.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(_serviceLabels[e.key] ?? e.key.name),
+                    Text('${e.value.toStringAsFixed(2)} MDL'),
+                  ],
+                ),
+              )),
+            ]
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildExpenseRow(String label, double value, {required Color color, bool isBold = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
+          Text(
+            '${value.toStringAsFixed(2)} MDL',
+            style: TextStyle(
+              color: color, 
+              fontWeight: FontWeight.bold,
+              fontSize: isBold ? 18 : 14,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildYearlyBreakdownCard() {
+    if (_yearlyExpenses.isEmpty) return const SizedBox();
+    
+    final sortedYears = _yearlyExpenses.keys.toList()..sort((a, b) => b.compareTo(a));
+
+    return Card(
+      elevation: 4,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Cheltuieli pe Ani', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            const Divider(height: 30),
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: sortedYears.length,
+              separatorBuilder: (_, __) => const Divider(),
+              itemBuilder: (context, index) {
+                final year = sortedYears[index];
+                final total = _yearlyExpenses[year]!;
+                return Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Anul $year', style: const TextStyle(fontSize: 16)),
+                    Text(
+                      '${total.toStringAsFixed(2)} MDL',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ],
+        ),
       ),
     );
   }

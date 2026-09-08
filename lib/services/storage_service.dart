@@ -120,4 +120,47 @@ class StorageService {
     records.removeWhere((r) => r.vehicleId == vehicleId);
     await saveServiceRecords(records);
   }
+
+  // --- aggregation Methods ---
+
+  Future<double> getTotalFuelCost(String vehicleId) async {
+    final entries = await getEntriesForVehicle(vehicleId);
+    return entries.fold(0.0, (sum, e) => sum + e.totalCost);
+  }
+
+  Future<double> getTotalServiceCost(String vehicleId) async {
+    final records = await getServiceRecords(vehicleId);
+    return records.fold(0.0, (sum, r) => sum + (r.cost ?? 0.0));
+  }
+
+  Future<Map<ServiceType, double>> getServiceCostByType(String vehicleId) async {
+    final records = await getServiceRecords(vehicleId);
+    final Map<ServiceType, double> costs = {};
+    for (var r in records) {
+      if (r.cost != null) {
+        costs[r.type] = (costs[r.type] ?? 0.0) + r.cost!;
+      }
+    }
+    return costs;
+  }
+
+  Future<Map<int, double>> getExpensesByYear(String vehicleId) async {
+    final entries = await getEntriesForVehicle(vehicleId);
+    final records = await getServiceRecords(vehicleId);
+    final Map<int, double> yearlyCosts = {};
+
+    for (var e in entries) {
+      final year = e.date.year;
+      yearlyCosts[year] = (yearlyCosts[year] ?? 0.0) + e.totalCost;
+    }
+
+    for (var r in records) {
+      if (r.cost != null) {
+        final year = r.date.year;
+        yearlyCosts[year] = (yearlyCosts[year] ?? 0.0) + r.cost!;
+      }
+    }
+
+    return yearlyCosts;
+  }
 }
