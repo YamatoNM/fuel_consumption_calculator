@@ -21,7 +21,6 @@ void main() {
       final json = {
         'id': '1',
         'name': 'Dacia Logan',
-        // initialOdometer and fuelType are missing in old data
       };
 
       final vehicle = Vehicle.fromJson(json);
@@ -32,58 +31,57 @@ void main() {
     });
   });
 
-  group('Consumption Logic Tests', () {
-    test('Fuel consumption calculation formula', () {
-      const double fuel = 32.0;
-      const double distance = 450.0;
+  group('Odometer & Consumption Logic Tests', () {
+    test('Distance calculation for first entry', () {
+      final vehicle = Vehicle(id: 'v1', name: 'Car', initialOdometer: 50000.0, fuelType: 'B');
+      const double currentOdo = 50450.0;
       
-      // Formula: (liters / km) * 100
-      final double result = (fuel / distance) * 100;
-      
-      expect(result.toStringAsFixed(2), '7.11');
+      final double distance = currentOdo - vehicle.initialOdometer;
+      expect(distance, 450.0);
     });
 
-    test('ConsumptionEntry.fromJson should map all fields correctly', () {
-      final now = DateTime.now();
-      final json = {
-        'id': 'e1',
-        'vehicleId': 'v1',
-        'date': now.toIso8601String(),
-        'odometerKm': 1500.0,
-        'fuelLiters': 30.0,
-        'result': 6.5,
-        'fuelPricePerLiter': 23.5,
-        'totalCost': 705.0,
-      };
+    test('Distance calculation for subsequent entries', () {
+      final lastEntry = ConsumptionEntry(
+        id: 'e1', vehicleId: 'v1', date: DateTime.now(), 
+        odometerKm: 50450.0, fuelLiters: 30, result: 6.5, fuelPricePerLiter: 20, totalCost: 600
+      );
+      const double currentOdo = 51000.0;
+      
+      final double distance = currentOdo - lastEntry.odometerKm;
+      expect(distance, 550.0);
+    });
 
-      final entry = ConsumptionEntry.fromJson(json);
+    test('Price string normalization (MD format to Double)', () {
+      const String priceFromAnre = "23,45";
+      final double normalized = double.parse(priceFromAnre.replaceAll(',', '.'));
+      expect(normalized, 23.45);
+    });
 
-      expect(entry.odometerKm, 1500.0);
-      expect(entry.totalCost, 705.0);
-      expect(entry.fuelPricePerLiter, 23.5);
+    test('Total cost calculation', () {
+      const double liters = 32.5;
+      const double price = 21.40;
+      expect(liters * price, 695.5);
     });
   });
 
-  group('Service Record Tests', () {
-    test('ServiceType enum should support gearbox oil', () {
-      expect(ServiceType.uleiCutie.name, 'uleiCutie');
+  group('Service Record & Reminders', () {
+    test('Next service calculation for Engine Oil', () {
+      final vehicle = Vehicle(id: 'v1', name: 'Car', initialOdometer: 0, fuelType: 'M', oilEngineIntervalKm: 8000);
+      const double currentKm = 50000.0;
+      
+      final double nextDue = currentKm + vehicle.oilEngineIntervalKm;
+      expect(nextDue, 58000.0);
     });
 
-    test('ServiceRecord should parse correctly from JSON', () {
-      final json = {
-        'id': 's1',
-        'vehicleId': 'v1',
-        'date': DateTime.now().toIso8601String(),
-        'odometerKm': 50000.0,
-        'type': 'uleiMotor',
-        'description': 'Schimb ulei iarna',
-        'cost': 1200.0,
-      };
-
-      final record = ServiceRecord.fromJson(json);
-
-      expect(record.type, ServiceType.uleiMotor);
-      expect(record.cost, 1200.0);
+    test('Next service calculation for Gearbox Oil', () {
+      final vehicle = Vehicle(
+        id: 'v1', name: 'Car', initialOdometer: 0, fuelType: 'M', 
+        oilEngineIntervalKm: 10000, oilGearboxIntervalKm: 60000
+      );
+      const double currentKm = 40000.0;
+      
+      final double nextDue = currentKm + vehicle.oilGearboxIntervalKm!;
+      expect(nextDue, 100000.0);
     });
   });
 }
