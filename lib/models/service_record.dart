@@ -1,5 +1,6 @@
 enum ServiceType {
   uleiMotor,
+  uleiCutie,
   filtruUlei,
   filtruAer,
   filtruCombustibil,

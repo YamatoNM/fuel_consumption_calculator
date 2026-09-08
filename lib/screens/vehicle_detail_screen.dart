@@ -9,6 +9,7 @@ import '../services/storage_service.dart';
 import '../services/price_service.dart';
 import '../services/ai_ocr_service.dart';
 import 'add_service_record_screen.dart';
+import 'vehicle_settings_screen.dart';
 
 class VehicleDetailScreen extends StatefulWidget {
   final Vehicle vehicle;
@@ -214,6 +215,7 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
 
   final Map<ServiceType, IconData> _serviceIcons = {
     ServiceType.uleiMotor: Icons.oil_barrel,
+    ServiceType.uleiCutie: Icons.settings_input_component,
     ServiceType.filtruUlei: Icons.filter_alt,
     ServiceType.filtruAer: Icons.air,
     ServiceType.filtruCombustibil: Icons.gas_meter,
@@ -227,6 +229,7 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
 
   final Map<ServiceType, String> _serviceLabels = {
     ServiceType.uleiMotor: "Ulei motor",
+    ServiceType.uleiCutie: "Ulei cutie viteze",
     ServiceType.filtruUlei: "Filtru ulei",
     ServiceType.filtruAer: "Filtru aer",
     ServiceType.filtruCombustibil: "Filtru combustibil",
@@ -246,6 +249,21 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
         appBar: AppBar(
           title: Text(widget.vehicle.name),
           actions: [
+            IconButton(
+              icon: const Icon(Icons.settings),
+              onPressed: () async {
+                final result = await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => VehicleSettingsScreen(vehicle: widget.vehicle),
+                  ),
+                );
+                if (result == true) {
+                  _loadData();
+                }
+              },
+              tooltip: 'Setări automobil',
+            ),
             IconButton(
               icon: const Icon(Icons.refresh),
               onPressed: () => setState(() {

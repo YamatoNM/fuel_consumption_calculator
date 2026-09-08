@@ -62,6 +62,7 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
 
   final Map<ServiceType, String> _typeLabels = {
     ServiceType.uleiMotor: "Ulei motor",
+    ServiceType.uleiCutie: "Ulei cutie viteze",
     ServiceType.filtruUlei: "Filtru ulei",
     ServiceType.filtruAer: "Filtru aer",
     ServiceType.filtruCombustibil: "Filtru combustibil",
@@ -145,7 +146,19 @@ class _AddServiceRecordScreenState extends State<AddServiceRecordScreen> {
                     child: Text(_typeLabels[type]!),
                   );
                 }).toList(),
-                onChanged: (val) => setState(() => _selectedType = val!),
+                onChanged: (val) {
+                  setState(() {
+                    _selectedType = val!;
+                    // Auto-calculate nextDueKm for oil changes
+                    if (val == ServiceType.uleiMotor) {
+                      final currentKm = double.tryParse(_odoController.text) ?? 0;
+                      _nextDueKmController.text = (currentKm + widget.vehicle.oilEngineIntervalKm).toStringAsFixed(0);
+                    } else if (val == ServiceType.uleiCutie && widget.vehicle.oilGearboxIntervalKm != null) {
+                      final currentKm = double.tryParse(_odoController.text) ?? 0;
+                      _nextDueKmController.text = (currentKm + widget.vehicle.oilGearboxIntervalKm!).toStringAsFixed(0);
+                    }
+                  });
+                },
               ),
               const SizedBox(height: 16),
 
