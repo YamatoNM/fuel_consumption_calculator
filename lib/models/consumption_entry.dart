@@ -34,9 +34,9 @@ class ConsumptionEntry {
         id: json['id'],
         vehicleId: json['vehicleId'],
         date: DateTime.parse(json['date']),
-        odometerKm: (json['odometerKm'] as num).toDouble(),
-        fuelLiters: (json['fuelLiters'] as num).toDouble(),
-        result: (json['result'] as num).toDouble(),
+        odometerKm: (json['odometerKm'] as num? ?? 0.0).toDouble(),
+        fuelLiters: (json['fuelLiters'] as num? ?? 0.0).toDouble(),
+        result: (json['result'] as num? ?? 0.0).toDouble(),
         fuelPricePerLiter: (json['fuelPricePerLiter'] as num? ?? 0.0).toDouble(),
         totalCost: (json['totalCost'] as num? ?? 0.0).toDouble(),
       );

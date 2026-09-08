@@ -21,7 +21,7 @@ class Vehicle {
   factory Vehicle.fromJson(Map<String, dynamic> json) => Vehicle(
         id: json['id'],
         name: json['name'],
-        initialOdometer: (json['initialOdometer'] as num).toDouble(),
+        initialOdometer: (json['initialOdometer'] as num? ?? 0.0).toDouble(),
         fuelType: json['fuelType'] ?? 'Motorină',
       );
 }
