@@ -18,8 +18,8 @@ class AiOcrService {
       final base64Image = base64Encode(bytes);
 
       final prompt = isOdometer
-          ? 'Extract the current total odometer reading (total kilometers) from this dashboard image. Return ONLY a JSON object: {"odometer_km": value, "confidence": "high"|"low"}.'
-          : 'Extract the fuel quantity in liters and the price per liter from this fuel receipt. Return ONLY a JSON object: {"fuel_liters": value, "price_per_liter": value, "confidence": "high"|"low"}.';
+          ? 'Identify and extract the TOTAL odometer reading (ODO) from this car dashboard image. Focus on the highest numerical value that represents the total distance traveled by the vehicle, ignoring any temporary trip meters (Trip A or Trip B). Return ONLY a JSON object: {"odometer_km": value, "confidence": "high"|"low"}.'
+          : 'Extract the fuel quantity in liters and the unit price per liter from this fuel receipt. Return ONLY a JSON object: {"fuel_liters": value, "price_per_liter": value, "confidence": "high"|"low"}.';
 
       final url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey';
 
@@ -50,7 +50,11 @@ class AiOcrService {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final textResponse = data['candidates'][0]['content']['parts'][0]['text'];
+        String textResponse = data['candidates'][0]['content']['parts'][0]['text'];
+        
+        // Clean up markdown code blocks if present
+        textResponse = textResponse.replaceAll('```json', '').replaceAll('```', '').trim();
+        
         return jsonDecode(textResponse);
       } else {
         print('Gemini API Error: ${response.statusCode} - ${response.body}');
