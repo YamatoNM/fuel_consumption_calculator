@@ -498,4 +498,3 @@ class _VehicleDetailScreenState extends State<VehicleDetailScreen> {
     );
   }
 }
-}
